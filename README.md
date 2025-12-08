@@ -42,7 +42,7 @@ python -m venv .venv
 .venv\Scripts\activate
 
 # Install dependencies
-pip install pandas openpyxl opencv-python pillow
+pip install -r requirements.txt
 ```
 
 ## Orientation Detection Logic
