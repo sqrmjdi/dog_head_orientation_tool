@@ -1,0 +1,76 @@
+# === DATA FILES ===
+# Exclude data folder contents (Excel, video files)
+head_orientation/data/
+*.xlsx
+*.xls
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# === OUTPUT FILES ===
+# Exclude generated output
+head_orientation/output/
+*_labels.csv
+*_manual_labels.csv
+
+# === PYTHON ===
+# Virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# === IDE / EDITORS ===
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# === OS FILES ===
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# === MISC ===
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+~*
