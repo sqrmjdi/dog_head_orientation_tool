@@ -8,29 +8,13 @@ A Python tool for labeling and analyzing dog head orientation from DeepLabCut tr
 
 ```bash
 git clone https://github.com/sqrmjdi/dog_head_orientation_tool.git
+
+```
+### 2. Change directory to source code
+```bash
+
 cd dog_head_orientation_tool
 ```
-
-### 2. Put data folder in the repo
-
-Create a `head_orientation/data/` folder and add your:
-
-- Video files (`.mp4`, `.avi`, `.mov`)
-- DeepLabCut Excel files (`.xlsx`)
-
-### 3. Run the manual labeling tool
-
-```bash
-python head_orientation/manual_labeling_ui.py
-```
-
-## Features
-
-- **Automatic Orientation Detection** - Classifies head orientation as LEFT, RIGHT, STRAIGHT, or ELSEWHERE
-- **Manual Labeling UI** - Review and correct auto-detected labels with video preview
-- **Head Tilt Angle Calculation** - Visualizes the angle of head tilt
-- **Configurable Frame Intervals** - Label at 1s, 0.5s, or 0.2s intervals
-- **Nose Landmark Visualization** - See the nose tracking points used for detection
 
 ## Installation
 
@@ -44,6 +28,29 @@ python -m venv .venv
 # Install dependencies
 pip install -r requirements.txt
 ```
+
+### 3. Put data folder in the codebase
+
+Create a `head_orientation/data/` folder and add your:
+
+- Video files (`.mp4`, `.avi`, `.mov`)
+- DeepLabCut Excel files (`.xlsx`)
+
+### 4. Run the manual labeling tool
+
+```bash
+python head_orientation/manual_labeling_ui.py
+```
+
+## Features
+
+- **Automatic Orientation Detection** - Classifies head orientation as LEFT, RIGHT, STRAIGHT, or ELSEWHERE
+- **Manual Labeling UI** - Review and correct auto-detected labels with video preview
+- **Head Tilt Angle Calculation** - Visualizes the angle of head tilt
+- **Configurable Frame Intervals** - Label at 1s, 0.5s, or 0.2s intervals
+- **Nose Landmark Visualization** - See the nose tracking points used for detection
+
+
 
 ## Orientation Detection Logic
 
