@@ -934,7 +934,7 @@ class ManualLabelingApp:
         )
         
         if path:
-            # Create DataFrame
+            # Create DataFrame with segment data
             data = []
             for seg_idx in range(self.total_segments):
                 time_start = seg_idx * self.frame_interval
@@ -950,9 +950,44 @@ class ManualLabelingApp:
                 })
             
             df = pd.DataFrame(data)
+            
+            # Calculate percentages for each orientation
+            total = len(df)
+            orientation_counts = df['orientation'].value_counts()
+            
+            # Create summary row with percentages
+            summary_data = {
+                'segment': 'SUMMARY',
+                'time_start': '',
+                'time_end': '',
+                'interval': '',
+                'orientation': '',
+                'auto_predicted': '',
+                'modified': ''
+            }
+            
+            # Add counts and percentages
+            for orientation in ['LEFT', 'RIGHT', 'STRAIGHT', 'ELSEWHERE']:
+                count = orientation_counts.get(orientation, 0)
+                percentage = (count / total * 100) if total > 0 else 0
+                summary_data[f'{orientation}_count'] = count
+                summary_data[f'{orientation}_percentage'] = f"{percentage:.1f}%"
+            
+            # Append summary row to dataframe
+            summary_df = pd.DataFrame([summary_data])
+            df = pd.concat([df, summary_df], ignore_index=True)
+            
             df.to_csv(path, index=False)
             
-            messagebox.showinfo("Saved!", f"Labels saved to:\n{path}")
+            # Show summary with percentages
+            summary_msg = f"Labels saved to:\n{path}\n\n--- SUMMARY ---\n"
+            for orientation in ['LEFT', 'RIGHT', 'STRAIGHT', 'ELSEWHERE']:
+                count = orientation_counts.get(orientation, 0)
+                percentage = (count / total * 100) if total > 0 else 0
+                summary_msg += f"{orientation}: {count} ({percentage:.1f}%)\n"
+            summary_msg += f"Total: {total}"
+            
+            messagebox.showinfo("Saved!", summary_msg)
             
     def on_close(self):
         """Cleanup on close."""
