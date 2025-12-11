@@ -16,7 +16,7 @@ git clone https://github.com/sqrmjdi/dog_head_orientation_tool.git
 cd dog_head_orientation_tool
 ```
 
-## Installation
+### 3. Installation
 # Create virtual environment
 ```bash
 python -m venv .venv
