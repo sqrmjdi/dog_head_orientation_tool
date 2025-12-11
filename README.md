@@ -17,21 +17,19 @@ cd dog_head_orientation_tool
 ```
 
 ## Installation
-
-```bash
 # Create virtual environment
+```bash
 python -m venv .venv
 ```
 
-```bash
 # Activate virtual environment (Windows)
+```bash
 .venv\Scripts\activate
 ```
 
-note: make sure you're in the right directory with requirements.txt there !!!
-
-```bash
 # Install dependencies
+note: make sure you're in the right directory with requirements.txt there !!!
+```bash
 pip install -r requirements.txt
 ```
 
