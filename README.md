@@ -25,6 +25,7 @@ python -m venv .venv
 # Activate virtual environment (Windows)
 .venv\Scripts\activate
 
+note: make sure you're in the right directory with requirements.txt there !!!
 # Install dependencies
 pip install -r requirements.txt
 ```
