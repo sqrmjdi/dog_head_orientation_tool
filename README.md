@@ -17,30 +17,30 @@ cd dog_head_orientation_tool
 ```
 
 ### 3. Installation
-# Create virtual environment
+## Create virtual environment
 ```bash
 python -m venv .venv
 ```
 
-# Activate virtual environment (Windows)
+## Activate virtual environment (Windows)
 ```bash
 .venv\Scripts\activate
 ```
 
-# Install dependencies
+## Install dependencies
 note: make sure you're in the right directory with requirements.txt there !!!
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Put data folder in the codebase
+### 4. Put data folder in the codebase
 
 Create a `head_orientation/data/` folder and add your:
 
 - Video files (`.mp4`, `.avi`, `.mov`)
 - DeepLabCut Excel files (`.xlsx`)
 
-### 4. Run the manual labeling tool
+### 5. Run the manual labeling tool
 
 ```bash
 python head_orientation/manual_labeling_ui.py
