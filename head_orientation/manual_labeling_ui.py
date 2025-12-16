@@ -13,6 +13,18 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import math
+import sys
+import os
+
+
+def get_application_path():
+    """Get the application path, handling both script and frozen exe scenarios."""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled exe
+        return Path(os.path.dirname(sys.executable))
+    else:
+        # Running as script
+        return Path(__file__).parent
 
 
 class ManualLabelingApp:
@@ -21,8 +33,8 @@ class ManualLabelingApp:
         self.root.title("Dog Head Orientation - Manual Labeler")
         self.root.geometry("1200x750")
         
-        # Project directories
-        self.project_dir = Path(__file__).parent
+        # Project directories - handle both script and exe scenarios
+        self.project_dir = get_application_path()
         self.data_dir = self.project_dir / "data"
         self.output_dir = self.project_dir / "output"
         self.data_dir.mkdir(exist_ok=True)
@@ -494,9 +506,9 @@ class ManualLabelingApp:
         instead of orientation. Orientation only output when both likelihoods >= 0.6.
         
         Classification ranges (EXPLICIT AND ROBUST):
-        - LEFT: 125 < x < 325
-        - STRAIGHT: 325 < x < 600
-        - RIGHT: 600 < x < 800
+        - LEFT: 125 < x < 375
+        - STRAIGHT: 375 < x < 550
+        - RIGHT: 550 < x < 800
         - ELSEWHERE: x < 125 or x > 800
         """
         W, H = 920, 518
@@ -571,13 +583,13 @@ class ManualLabelingApp:
         
         # Classify based on explicit range boundaries
         # IMPORTANT: Check ranges in order, with explicit conditions
-        if x_border > 125 and x_border < 325:
+        if x_border > 125 and x_border < 375:
             # LEFT panel
             orientation = "left"
-        elif x_border > 600 and x_border < 800:
+        elif x_border > 550 and x_border < 800:
             # RIGHT panel
             orientation = "right"
-        elif x_border > 325 and x_border < 600:
+        elif x_border > 375 and x_border < 550:
             # STRAIGHT zone (between panels)
             orientation = "straight"
         else:
@@ -634,11 +646,11 @@ class ManualLabelingApp:
         
         # Status text showing panel ranges
         if orientation == "LEFT":
-            self.tilt_status_var.set("Left panel: (125, 325)")
+            self.tilt_status_var.set("Left panel: (125, 375)")
         elif orientation == "RIGHT":
-            self.tilt_status_var.set("Right panel: (600, 800)")
+            self.tilt_status_var.set("Right panel: (550, 800)")
         elif orientation == "STRAIGHT":
-            self.tilt_status_var.set("Between panels: (325, 600)")
+            self.tilt_status_var.set("Between panels: (375, 550)")
         elif orientation == "POOR LIKELIHOOD":
             self.tilt_status_var.set("Likelihood < 0.6")
         else:
@@ -901,11 +913,11 @@ class ManualLabelingApp:
         
         # Exact panel ranges (updated)
         PANEL_LEFT_MIN = 125
-        PANEL_LEFT_MAX = 325
-        PANEL_RIGHT_MIN = 600
+        PANEL_LEFT_MAX = 375
+        PANEL_RIGHT_MIN = 550
         PANEL_RIGHT_MAX = 800
-        STRAIGHT_MIN = 325
-        STRAIGHT_MAX = 600
+        STRAIGHT_MIN = 375
+        STRAIGHT_MAX = 550
         
         # Padding on canvas
         padding = 10
