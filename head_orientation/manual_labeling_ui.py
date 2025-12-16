@@ -45,6 +45,7 @@ class ManualLabelingApp:
         self.auto_labels = {}  # auto-predicted labels
         self.angle_data = {}  # index -> (angle, is_straight)
         self.nose_landmarks = {}  # index -> dict of nose landmark positions
+        self.border_data = {}  # index -> (x_bordo, y_bordo) from ray intersection
         
         # UI state
         self.photo = None  # Keep reference to prevent garbage collection
@@ -200,8 +201,8 @@ class ManualLabelingApp:
         info_frame = ttk.Frame(angle_frame)
         info_frame.pack(pady=2, fill="x")
         
-        # Y difference display
-        self.y_diff_var = tk.StringVar(value="ΔY: --")
+        # X difference display
+        self.y_diff_var = tk.StringVar(value="ΔX: --")
         ttk.Label(info_frame, textvariable=self.y_diff_var, font=('Helvetica', 8)).pack(side="left", padx=5)
         
         # Detected orientation
@@ -228,6 +229,18 @@ class ManualLabelingApp:
         
         self.tilt_direction_var = tk.StringVar(value="")
         ttk.Label(tilt_info_frame, textvariable=self.tilt_direction_var, font=('Helvetica', 9)).pack(side="right", padx=5)
+        
+        # === IMAGE SPACE VISUALIZATION ===
+        image_frame = ttk.LabelFrame(right_frame, text="Image Space & Ray", padding="3")
+        image_frame.pack(pady=3, fill="x")
+        
+        # Canvas for image space visualization
+        self.image_space_canvas = tk.Canvas(image_frame, width=180, height=130, bg="white", highlightthickness=1, highlightbackground="gray")
+        self.image_space_canvas.pack(pady=2)
+        
+        # Info text below canvas
+        self.ray_hit_var = tk.StringVar(value="Ray hit: --")
+        ttk.Label(image_frame, textvariable=self.ray_hit_var, font=('Helvetica', 8)).pack(pady=2)
         
         # SAVE BUTTON - prominent at bottom
         save_btn = tk.Button(
@@ -358,19 +371,16 @@ class ManualLabelingApp:
             'nose_left_x', 'nose_left_y', 'nose_left_likelihood'
         ]
         
-        # Calculate metrics
-        df['nose_width'] = df['nose_right_x'] - df['nose_left_x']
-        df['nose_midpoint_x'] = (df['nose_right_x'] + df['nose_left_x']) / 2
-        df['tip_offset'] = df['nose_tip_x'] - df['nose_midpoint_x']
-        df['tip_offset_ratio'] = np.where(
-            np.abs(df['nose_width']) > 5,
-            df['tip_offset'] / df['nose_width'],
-            0
-        )
-        df['avg_likelihood'] = (
-            df['nose_tip_likelihood'] + df['nose_right_likelihood'] + 
-            df['nose_left_likelihood'] + df['nose_bottom_likelihood']
-        ) / 4
+        # Convert all coordinate columns to numeric (IMPORTANT!)
+        coord_cols = [
+            'nose_tip_x', 'nose_tip_y', 'nose_tip_likelihood',
+            'nose_right_x', 'nose_right_y', 'nose_right_likelihood',
+            'nose_bottom_x', 'nose_bottom_y', 'nose_bottom_likelihood',
+            'nose_left_x', 'nose_left_y', 'nose_left_likelihood'
+        ]
+        
+        for col in coord_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
         
         self.df = df
         
@@ -384,6 +394,7 @@ class ManualLabelingApp:
         self.auto_labels = {}
         self.angle_data = {}
         self.nose_landmarks = {}
+        self.border_data = {}
         
         for seg_idx in range(self.total_segments):
             start_idx = int(seg_idx * frames_per_segment)
@@ -394,18 +405,20 @@ class ManualLabelingApp:
                 self.auto_labels[seg_idx] = "ELSEWHERE"
                 self.nose_landmarks[seg_idx] = None
                 self.angle_data[seg_idx] = (0, True)
+                self.border_data[seg_idx] = (None, None)
                 continue
             
             # Get average nose landmark positions for this segment
             avg_tip_x = segment_data['nose_tip_x'].mean()
             avg_tip_y = segment_data['nose_tip_y'].mean()
+            avg_tip_likelihood = segment_data['nose_tip_likelihood'].mean()
             avg_right_x = segment_data['nose_right_x'].mean()
             avg_right_y = segment_data['nose_right_y'].mean()
             avg_left_x = segment_data['nose_left_x'].mean()
             avg_left_y = segment_data['nose_left_y'].mean()
             avg_bottom_x = segment_data['nose_bottom_x'].mean()
             avg_bottom_y = segment_data['nose_bottom_y'].mean()
-            avg_likelihood = segment_data['avg_likelihood'].mean()
+            avg_bottom_likelihood = segment_data['nose_bottom_likelihood'].mean()
             
             # Store landmarks for visualization
             self.nose_landmarks[seg_idx] = {
@@ -413,25 +426,26 @@ class ManualLabelingApp:
                 'right': (avg_right_x, avg_right_y),
                 'left': (avg_left_x, avg_left_y),
                 'bottom': (avg_bottom_x, avg_bottom_y),
-                'likelihood': avg_likelihood
+                'tip_likelihood': avg_tip_likelihood,
+                'bottom_likelihood': avg_bottom_likelihood
             }
             
-            # Classify using nose.right Y vs nose.left Y comparison
-            # Margin of error: 2 pixels
-            margin = 2.0
-            y_diff = avg_right_y - avg_left_y  # positive = right is lower
+            # Classify using ray intersection with image border (based on X,Y coordinates only)
+            x_border, y_border, orientation = self.classify_orientation_by_ray_intersection(
+                avg_bottom_x, avg_bottom_y, avg_tip_x, avg_tip_y,
+                bottom_likelihood=avg_bottom_likelihood,
+                tip_likelihood=avg_tip_likelihood
+            )
             
-            if avg_likelihood < 0.3:
-                orientation = "ELSEWHERE"
-            elif abs(y_diff) <= margin:
-                # nose.right Y ≈ nose.left Y -> STRAIGHT
-                orientation = "STRAIGHT"
-            elif y_diff < -margin:
-                # nose.right Y < nose.left Y -> LEFT
-                orientation = "LEFT"
-            else:
-                # nose.left Y < nose.right Y -> RIGHT
-                orientation = "RIGHT"
+            # Store x_bordo and y_bordo values
+            self.border_data[seg_idx] = (x_border, y_border)
+            
+            # If undefined or poor likelihood, mark as "poor likelihood"
+            if orientation in ("undefined", "poor_likelihood"):
+                orientation = "poor likelihood"
+            
+            # Capitalize for consistency
+            orientation = orientation.upper()
             
             self.auto_labels[seg_idx] = orientation
             
@@ -447,7 +461,7 @@ class ManualLabelingApp:
         
         If nose.bottom X ≈ nose.tip X (within margin), head is straight (0°).
         Otherwise, calculate the angle from vertical.
-        
+
         Returns: (angle_degrees, is_straight)
         """
         # Calculate horizontal difference
@@ -470,13 +484,115 @@ class ManualLabelingApp:
         
         return round(angle_deg, 1), False
     
+    def classify_orientation_by_ray_intersection(self, bottom_x, bottom_y, tip_x, tip_y, 
+                                                 bottom_likelihood=None, tip_likelihood=None):
+        """
+        Classify head orientation by computing where the nose axis ray intersects the image border.
+        
+        POST-CALCULATION LIKELIHOOD CHECK (PRIORITY RULE):
+        If bottom_likelihood < 0.6 OR tip_likelihood < 0.6, returns "poor_likelihood"
+        instead of orientation. Orientation only output when both likelihoods >= 0.6.
+        
+        Classification ranges (EXPLICIT AND ROBUST):
+        - LEFT: 125 < x < 325
+        - STRAIGHT: 325 < x < 600
+        - RIGHT: 600 < x < 800
+        - ELSEWHERE: x < 125 or x > 800
+        """
+        W, H = 920, 518
+        
+        # Convert all inputs to float
+        try:
+            bottom_x = float(bottom_x)
+            bottom_y = float(bottom_y)
+            tip_x = float(tip_x)
+            tip_y = float(tip_y)
+        except (ValueError, TypeError):
+            return None, None, "undefined"
+        
+        # Check for NaN values
+        if any(np.isnan(v) for v in [bottom_x, bottom_y, tip_x, tip_y]):
+            return None, None, "undefined"
+        
+        # POST-CALCULATION LIKELIHOOD CHECK (PRIORITY RULE)
+        # If either likelihood is provided and < 0.6, return poor_likelihood
+        if bottom_likelihood is not None and bottom_likelihood < 0.6:
+            return None, None, "poor_likelihood"
+        if tip_likelihood is not None and tip_likelihood < 0.6:
+            return None, None, "poor_likelihood"
+        
+        # Direction vector
+        dx = tip_x - bottom_x
+        dy = tip_y - bottom_y
+        x1, y1 = bottom_x, bottom_y
+        
+        # Find all valid border intersections
+        intersections = []
+        
+        if dx != 0:
+            # Left border
+            t = (0 - x1) / dx
+            if t >= 0:
+                y = y1 + t * dy
+                if 0 <= y <= H - 1:
+                    intersections.append((t, 0, y))
+        
+            # Right border
+            t = (W - 1 - x1) / dx
+            if t >= 0:
+                y = y1 + t * dy
+                if 0 <= y <= H - 1:
+                    intersections.append((t, W - 1, y))
+        
+        if dy != 0:
+            # Top border
+            t = (0 - y1) / dy
+            if t >= 0:
+                x = x1 + t * dx
+                if 0 <= x <= W - 1:
+                    intersections.append((t, x, 0))
+        
+            # Bottom border
+            t = (H - 1 - y1) / dy
+            if t >= 0:
+                x = x1 + t * dx
+                if 0 <= x <= W - 1:
+                    intersections.append((t, x, H - 1))
+        
+        if not intersections:
+            return None, None, "undefined"
+        
+        # Get first intersection (smallest t)
+        intersections.sort(key=lambda x: x[0])
+        t, x_border, y_border = intersections[0]
+        
+        # Round x_border to handle floating point precision issues
+        x_border = round(x_border, 1)
+        
+        # Classify based on explicit range boundaries
+        # IMPORTANT: Check ranges in order, with explicit conditions
+        if x_border > 125 and x_border < 325:
+            # LEFT panel
+            orientation = "left"
+        elif x_border > 600 and x_border < 800:
+            # RIGHT panel
+            orientation = "right"
+        elif x_border > 325 and x_border < 600:
+            # STRAIGHT zone (between panels)
+            orientation = "straight"
+        else:
+            # ELSEWHERE (x_border < 125 or x_border > 800)
+            orientation = "elsewhere"
+        
+        return x_border, y_border, orientation
+    
     def update_angle_display(self):
         """Update the nose landmarks visualization and orientation info."""
         landmarks = self.nose_landmarks.get(self.current_index)
         angle_data = self.angle_data.get(self.current_index)
         
         if landmarks is None or angle_data is None:
-            self.y_diff_var.set("ΔY: --")
+            self.y_diff_var.set("Ray: --")
             self.detected_orient_var.set("No data")
             self.angle_var.set("Angle: --")
             self.tilt_status_var.set("")
@@ -485,17 +601,26 @@ class ManualLabelingApp:
             self.draw_empty_tilt_canvas()
             return
         
-        # Calculate Y difference (right Y - left Y)
-        right_y = landmarks['right'][1]
-        left_y = landmarks['left'][1]
-        y_diff = right_y - left_y
-        
-        # Update Y difference display
-        self.y_diff_var.set(f"ΔY: {y_diff:.1f}px")
-        
-        # Update detected orientation
+        # Get orientation from ray intersection
         orientation = self.auto_labels.get(self.current_index, "--")
         self.detected_orient_var.set(f"→ {orientation}")
+        
+        # Compute ray intersection for display
+        tip = landmarks['tip']
+        bottom = landmarks['bottom']
+        tip_likelihood = landmarks.get('tip_likelihood', None)
+        bottom_likelihood = landmarks.get('bottom_likelihood', None)
+        
+        # Calculate delta X (difference in x-coordinates between tip and bottom)
+        delta_x = tip[0] - bottom[0]
+        self.y_diff_var.set(f"ΔX: {delta_x:.1f}")
+        
+        x_border, y_border, _ = self.classify_orientation_by_ray_intersection(
+            bottom[0], bottom[1], tip[0], tip[1],
+            bottom_likelihood=bottom_likelihood,
+            tip_likelihood=tip_likelihood
+        )
+        
         
         # Update tilt angle
         angle, is_straight = angle_data
@@ -507,20 +632,26 @@ class ManualLabelingApp:
             direction = "tilted LEFT" if angle < 0 else "tilted RIGHT"
             self.tilt_direction_var.set(f"({direction})")
         
-        # Status text explaining the detection
-        margin = 2.0
-        if abs(y_diff) <= margin:
-            self.tilt_status_var.set(f"right_Y ≈ left_Y (±{margin}px)")
-        elif y_diff < -margin:
-            self.tilt_status_var.set(f"right_Y < left_Y")
+        # Status text showing panel ranges
+        if orientation == "LEFT":
+            self.tilt_status_var.set("Left panel: (125, 325)")
+        elif orientation == "RIGHT":
+            self.tilt_status_var.set("Right panel: (600, 800)")
+        elif orientation == "STRAIGHT":
+            self.tilt_status_var.set("Between panels: (325, 600)")
+        elif orientation == "POOR LIKELIHOOD":
+            self.tilt_status_var.set("Likelihood < 0.6")
         else:
-            self.tilt_status_var.set(f"left_Y < right_Y")
+            self.tilt_status_var.set("Outside panels: <125 or >800")
         
         # Draw nose landmarks visualization
         self.draw_nose_landmarks(landmarks, orientation)
         
         # Draw tilt angle visualization
         self.draw_tilt_angle(landmarks, angle, is_straight)
+        
+        # Draw image space with ray visualization
+        self.draw_image_space_with_ray(landmarks, orientation)
     
     def draw_empty_canvas(self):
         """Draw empty canvas with placeholder."""
@@ -752,6 +883,193 @@ class ManualLabelingApp:
         elif orientation == "STRAIGHT":
             self.angle_canvas.create_oval(w//2 - 5, arrow_y - 5, w//2 + 5, arrow_y + 5, fill="#95E1A3", outline="#95E1A3")
             
+    def draw_image_space_with_ray(self, landmarks, orientation):
+        """
+        Draw the image space visualization showing:
+        - Image bounds (920x518)
+        - Panel ranges (left, right)
+        - Nose landmarks
+        - Ray from nose bottom through tip to border
+        """
+        self.image_space_canvas.delete("all")
+        
+        w = self.image_space_canvas.winfo_width() or 180
+        h = self.image_space_canvas.winfo_height() or 130
+        
+        # Image dimensions
+        IMG_W, IMG_H = 920, 518
+        
+        # Exact panel ranges (updated)
+        PANEL_LEFT_MIN = 125
+        PANEL_LEFT_MAX = 325
+        PANEL_RIGHT_MIN = 600
+        PANEL_RIGHT_MAX = 800
+        STRAIGHT_MIN = 325
+        STRAIGHT_MAX = 600
+        
+        # Padding on canvas
+        padding = 10
+        canvas_w = w - 2 * padding
+        canvas_h = h - 2 * padding
+        
+        # Scale factors
+        scale_x = canvas_w / IMG_W
+        scale_y = canvas_h / IMG_H
+        
+        def img_to_canvas(x, y):
+            """Convert image coordinates to canvas coordinates."""
+            cx = padding + x * scale_x
+            cy = padding + y * scale_y
+            return cx, cy
+        
+        # Draw background (light gray)
+        self.image_space_canvas.create_rectangle(
+            padding, padding, padding + canvas_w, padding + canvas_h,
+            fill="#f5f5f5", outline="black", width=1
+        )
+        
+        # Draw left panel range (red background)
+        left_x1, _ = img_to_canvas(PANEL_LEFT_MIN, 0)
+        left_x2, _ = img_to_canvas(PANEL_LEFT_MAX, 0)
+        self.image_space_canvas.create_rectangle(
+            left_x1, padding, left_x2, padding + canvas_h,
+            fill="#FF6B6B", outline=""
+        )
+        self.image_space_canvas.create_text(
+            (left_x1 + left_x2) / 2, padding + 5,
+            text="L", fill="white", font=('Helvetica', 7, 'bold')
+        )
+        
+        # Draw right panel range (cyan background)
+        right_x1, _ = img_to_canvas(PANEL_RIGHT_MIN, 0)
+        right_x2, _ = img_to_canvas(PANEL_RIGHT_MAX, 0)
+        self.image_space_canvas.create_rectangle(
+            right_x1, padding, right_x2, padding + canvas_h,
+            fill="#4ECDC4", outline=""
+        )
+        self.image_space_canvas.create_text(
+            (right_x1 + right_x2) / 2, padding + 5,
+            text="R", fill="white", font=('Helvetica', 7, 'bold')
+        )
+        
+        # Draw straight zone (green background - subtle)
+        straight_x1, _ = img_to_canvas(STRAIGHT_MIN, 0)
+        straight_x2, _ = img_to_canvas(STRAIGHT_MAX, 0)
+        self.image_space_canvas.create_rectangle(
+            straight_x1, padding, straight_x2, padding + canvas_h,
+            fill="#95E1A3", outline=""
+        )
+        
+        # Draw image border
+        self.image_space_canvas.create_rectangle(
+            padding, padding, padding + canvas_w, padding + canvas_h,
+            outline="black", width=2
+        )
+        
+        # Get landmarks
+        tip = landmarks['tip']
+        bottom = landmarks['bottom']
+        
+        # Draw nose landmarks
+        tip_c = img_to_canvas(*tip)
+        bottom_c = img_to_canvas(*bottom)
+        
+        # Draw line from bottom through tip and extend to border
+        dx = tip[0] - bottom[0]
+        dy = tip[1] - bottom[1]
+        
+        # Calculate ray to border
+        if dx != 0 or dy != 0:
+            # Find which border the ray hits
+            intersections = []
+            
+            # Left border (x=0)
+            if dx != 0:
+                t = (0 - bottom[0]) / dx
+                if t >= 0:
+                    y = bottom[1] + t * dy
+                    if 0 <= y <= IMG_H - 1:
+                        intersections.append((t, 0, y))
+            
+            # Right border (x=919)
+            if dx != 0:
+                t = (IMG_W - 1 - bottom[0]) / dx
+                if t >= 0:
+                    y = bottom[1] + t * dy
+                    if 0 <= y <= IMG_H - 1:
+                        intersections.append((t, IMG_W - 1, y))
+            
+            # Top border (y=0)
+            if dy != 0:
+                t = (0 - bottom[1]) / dy
+                if t >= 0:
+                    x = bottom[0] + t * dx
+                    if 0 <= x <= IMG_W - 1:
+                        intersections.append((t, x, 0))
+            
+            # Bottom border (y=517)
+            if dy != 0:
+                t = (IMG_H - 1 - bottom[1]) / dy
+                if t >= 0:
+                    x = bottom[0] + t * dx
+                    if 0 <= x <= IMG_W - 1:
+                        intersections.append((t, x, IMG_H - 1))
+            
+            if intersections:
+                # Get first intersection (smallest t)
+                intersections.sort(key=lambda x: x[0])
+                t, x_border, y_border = intersections[0]
+                border_c = img_to_canvas(x_border, y_border)
+                
+                # Draw ray line from bottom through border
+                self.image_space_canvas.create_line(
+                    bottom_c[0], bottom_c[1], border_c[0], border_c[1],
+                    fill="purple", width=2
+                )
+                
+                # Draw marker at border intersection
+                marker_r = 3
+                self.image_space_canvas.create_oval(
+                    border_c[0] - marker_r, border_c[1] - marker_r,
+                    border_c[0] + marker_r, border_c[1] + marker_r,
+                    fill="purple", outline="white", width=1
+                )
+                
+                # Update ray hit information with likelihood check
+                likelihood_note = ""
+                if orientation == "elsewhere":
+                    # Check if it's poor likelihood
+                    tip_likelihood = landmarks.get('tip_likelihood', None)
+                    bottom_likelihood = landmarks.get('bottom_likelihood', None)
+                    if (bottom_likelihood is not None and bottom_likelihood < 0.6) or \
+                       (tip_likelihood is not None and tip_likelihood < 0.6):
+                        likelihood_note = " [poor likelihood]"
+                
+                self.ray_hit_var.set(f"Ray hit x={x_border:.0f} ({orientation}){likelihood_note}")
+        
+        # Draw nose landmarks as points
+        # Tip
+        self.image_space_canvas.create_oval(
+            tip_c[0] - 2, tip_c[1] - 2, tip_c[0] + 2, tip_c[1] + 2,
+            fill="#FFD700", outline="black", width=1
+        )
+        
+        # Bottom
+        self.image_space_canvas.create_oval(
+            bottom_c[0] - 2, bottom_c[1] - 2, bottom_c[0] + 2, bottom_c[1] + 2,
+            fill="white", outline="black", width=1
+        )
+        
+        # Draw axis labels
+        self.image_space_canvas.create_text(
+            padding - 5, padding + canvas_h + 3,
+            text="0", fill="gray", font=('Helvetica', 6)
+        )
+        self.image_space_canvas.create_text(
+            padding + canvas_w + 3, padding + canvas_h + 3,
+            text="920", fill="gray", font=('Helvetica', 6)
+        )
+            
     def create_overview_buttons(self):
         """Create the overview buttons at the bottom."""
         # Clear existing
@@ -786,7 +1104,8 @@ class ManualLabelingApp:
             "LEFT": "#FF6B6B",
             "RIGHT": "#4ECDC4", 
             "STRAIGHT": "#95E1A3",
-            "ELSEWHERE": "#B0B0B0"
+            "ELSEWHERE": "#B0B0B0",
+            "POOR LIKELIHOOD": "#FFB6C1"
         }
         
         for seg_idx, btn in self.overview_buttons.items():
@@ -916,37 +1235,38 @@ class ManualLabelingApp:
         self.show_segment(seg_idx)
         
     def save_labels(self):
-        """Save labels to CSV."""
+        """Save labels to Excel with summary in upper rows."""
         if not self.labels:
             messagebox.showerror("Error", "No labels to save!")
             return
             
         # Generate filename
         input_name = Path(self.excel_path).stem if self.excel_path else "output"
-        default_name = f"{input_name}_manual_labels.csv"
+        default_name = f"{input_name}_manual_labels.xlsx"
         
         path = filedialog.asksaveasfilename(
             title="Save Labels",
             initialdir=str(self.output_dir),
             initialfile=default_name,
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")]
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv")]
         )
         
         if path:
-            # Create DataFrame with segment data
+            # Create DataFrame with segment data (including x_bordo and y_bordo)
             data = []
             for seg_idx in range(self.total_segments):
                 time_start = seg_idx * self.frame_interval
                 time_end = (seg_idx + 1) * self.frame_interval
+                x_bordo, y_bordo = self.border_data.get(seg_idx, (None, None))
                 data.append({
                     'segment': seg_idx,
                     'time_start': time_start,
                     'time_end': time_end,
                     'interval': self.frame_interval,
                     'orientation': self.labels.get(seg_idx, "ELSEWHERE"),
-                    'auto_predicted': self.auto_labels.get(seg_idx, "ELSEWHERE"),
-                    'modified': self.labels.get(seg_idx) != self.auto_labels.get(seg_idx)
+                    'x_bordo': x_bordo,
+                    'y_bordo': y_bordo
                 })
             
             df = pd.DataFrame(data)
@@ -955,29 +1275,49 @@ class ManualLabelingApp:
             total = len(df)
             orientation_counts = df['orientation'].value_counts()
             
-            # Create summary row with percentages
-            summary_data = {
-                'segment': 'SUMMARY',
-                'time_start': '',
-                'time_end': '',
-                'interval': '',
-                'orientation': '',
-                'auto_predicted': '',
-                'modified': ''
-            }
-            
-            # Add counts and percentages
-            for orientation in ['LEFT', 'RIGHT', 'STRAIGHT', 'ELSEWHERE']:
-                count = orientation_counts.get(orientation, 0)
-                percentage = (count / total * 100) if total > 0 else 0
-                summary_data[f'{orientation}_count'] = count
-                summary_data[f'{orientation}_percentage'] = f"{percentage:.1f}%"
-            
-            # Append summary row to dataframe
-            summary_df = pd.DataFrame([summary_data])
-            df = pd.concat([df, summary_df], ignore_index=True)
-            
-            df.to_csv(path, index=False)
+            # Save to Excel with summary in upper rows starting from H2
+            if path.endswith('.xlsx'):
+                from openpyxl import Workbook
+                from openpyxl.styles import Font, Alignment
+                
+                # Create workbook
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Labels"
+                
+                # Write headers
+                headers = ['segment', 'time_start', 'time_end', 'interval', 'orientation', 'x_bordo', 'y_bordo']
+                for col_idx, header in enumerate(headers, 1):
+                    ws.cell(row=1, column=col_idx, value=header)
+                
+                # Write data rows
+                for row_idx, row_data in enumerate(data, 2):
+                    ws.cell(row=row_idx, column=1, value=row_data['segment'])
+                    ws.cell(row=row_idx, column=2, value=row_data['time_start'])
+                    ws.cell(row=row_idx, column=3, value=row_data['time_end'])
+                    ws.cell(row=row_idx, column=4, value=row_data['interval'])
+                    ws.cell(row=row_idx, column=5, value=row_data['orientation'])
+                    ws.cell(row=row_idx, column=6, value=row_data['x_bordo'])
+                    ws.cell(row=row_idx, column=7, value=row_data['y_bordo'])
+                
+                # Write summary starting from J2 (moved to accommodate new columns)
+                summary_row = 2
+                ws.cell(row=1, column=10, value="SUMMARY").font = Font(bold=True)
+                
+                for orientation in ['LEFT', 'RIGHT', 'STRAIGHT', 'ELSEWHERE']:
+                    count = orientation_counts.get(orientation, 0)
+                    percentage = (count / total * 100) if total > 0 else 0
+                    
+                    ws.cell(row=summary_row, column=10, value=f"{orientation}")
+                    ws.cell(row=summary_row, column=11, value=f"{count}")
+                    ws.cell(row=summary_row, column=12, value=f"{percentage:.1f}%")
+                    summary_row += 1
+                
+                # Save workbook
+                wb.save(path)
+            else:
+                # Save as CSV if user selected .csv
+                df.to_csv(path, index=False)
             
             # Show summary with percentages
             summary_msg = f"Labels saved to:\n{path}\n\n--- SUMMARY ---\n"
